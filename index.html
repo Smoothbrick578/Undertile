@@ -1,0 +1,660 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Undertile</title>
+    <style>
+        body {
+            background-color: #1a1a1a;
+            color: white;
+            font-family: 'Courier New', Courier, monospace;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: flex-start;
+            min-height: 100vh;
+            margin: 0;
+            padding-top: 20px;
+        }
+
+        h1 { margin: 0 0 10px 0; font-size: 24px; text-transform: uppercase; letter-spacing: 2px; text-align: center; }
+
+        /* UI Elements */
+        #ui-bar {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 15px;
+            font-size: 16px;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+
+        .stat-box {
+            background: #333;
+            padding: 8px 12px;
+            border: 2px solid #fff;
+            border-radius: 4px;
+        }
+
+        /* Difficulty Selector */
+        #difficulty-select {
+            display: flex;
+            gap: 5px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+
+        .diff-btn {
+            background: black;
+            color: white;
+            border: 2px solid gray;
+            padding: 8px 16px;
+            cursor: pointer;
+            font-family: inherit;
+            font-weight: bold;
+            transition: all 0.2s;
+        }
+
+        .diff-btn:hover { background: #333; }
+        .diff-btn.active { 
+            border-color: yellow; 
+            color: yellow; 
+            box-shadow: 0 0 8px yellow;
+        }
+
+        /* Game Board Area */
+        #game-container {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 10px;
+            background: #000;
+            border: 4px solid #fff;
+            overflow: auto; 
+            max-width: 95vw;
+            max-height: 70vh;
+        }
+
+        #game-board {
+            display: grid;
+            gap: 2px;
+            position: relative;
+        }
+
+        /* Tiles */
+        .tile {
+            width: 40px;
+            height: 40px;
+            box-sizing: border-box;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+        }
+
+        /* Tile Colors (Existing) */
+        .tile-pink { background-color: #ffc0cb; }
+        .tile-green { background-color: #90ee90; }
+        .tile-red { background-color: #ff4444; }
+        .tile-yellow { background-color: #ffff00; }
+        .tile-orange { background-color: #ffa500; }
+        .tile-purple { background-color: #da70d6; }
+        .tile-blue { background-color: #00bfff; }
+        .tile-finish { background-color: #ffffff; border: 4px double black; }
+        
+        /* New Tile Colors */
+        .tile-black { background-color: #111111; color: #fff; }
+        .tile-rainbow { 
+            background: linear-gradient(45deg, red, orange, yellow, green, blue, indigo, violet);
+            background-size: 200% 200%;
+            animation: rainbowShift 4s ease infinite;
+        }
+        @keyframes rainbowShift {
+            0% {background-position: 0% 50%;}
+            50% {background-position: 100% 50%;}
+            100% {background-position: 0% 50%;}
+        }
+        /* Cracked Tile */
+        .tile-cracked { background-color: #D2B48C; border: 2px dashed #654321; } 
+        .tile-cracked::after { content: "C"; color: #654321; font-weight: bold; font-size: 16px; }
+
+        /* Cracked Tile: Hole State */
+        .tile-cracked-hole { background-color: #303030; border: 2px solid #000; box-shadow: inset 0 0 5px black; }
+        .tile-cracked-hole::after { content: "O"; color: #111; font-weight: bold; font-size: 16px; }
+
+
+        /* Player */
+        #player {
+            width: 24px;
+            height: 24px;
+            background-color: transparent;
+            border: 2px solid black;
+            position: absolute;
+            z-index: 10;
+            transition: top 0.15s linear, left 0.15s linear;
+            pointer-events: none;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        #player::after {
+            content: "♥";
+            color: red;
+            font-size: 20px;
+            line-height: 20px;
+        }
+
+        #player.shocked::after {
+            content: "⚡";
+            color: yellow;
+            text-shadow: 0 0 2px black;
+        }
+
+        /* Footer / Win State */
+        .controls { margin-top: 15px; color: #aaa; font-size: 13px; text-align: center; max-width: 600px; }
+        
+        .action-btn {
+            margin-top: 10px;
+            padding: 10px 20px;
+            font-family: inherit;
+            font-weight: bold;
+            font-size: 16px;
+            cursor: pointer;
+            background: white;
+            border: none;
+            margin-left: 5px;
+            margin-right: 5px;
+        }
+        .action-btn:hover { background: #ccc; }
+
+        #win-overlay {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.85);
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 100;
+        }
+        #win-overlay h2 { color: yellow; font-size: 40px; margin-bottom: 10px; }
+        #win-overlay p { font-size: 20px; margin-bottom: 20px; }
+
+    </style>
+</head>
+<body>
+
+    <h1>Undertile</h1>
+
+    <div id="difficulty-select">
+        <button class="diff-btn active" onclick="setDifficulty('mercy')">Mercy</button>
+        <button class="diff-btn" onclick="setDifficulty('cool')">Cool Dude</button>
+        <button class="diff-btn" onclick="setDifficulty('bad')">Bad Time</button>
+        <button class="diff-btn" onclick="setDifficulty('determined')">Determined</button>
+    </div>
+
+    <div id="ui-bar">
+        <div class="stat-box">Flavor: <span id="flavor-display" style="color: #ccc">None</span></div>
+        <div class="stat-box">Score: <span id="score-display">0</span></div>
+    </div>
+
+    <div id="game-container">
+        <div id="game-board">
+            <div id="player"></div>
+        </div>
+    </div>
+
+    <div>
+        <button class="action-btn" onclick="respawn()">Respawn (Start Tile)</button>
+        <button class="action-btn" onclick="initGame()">Generate New Puzzle</button>
+    </div>
+
+    <div class="controls">
+        ARROWS/WASD to Move.<br>
+        <ul>
+            <li>Pink tiles: Have no effect and can be walked on freely.</li>
+            <li>Green tiles: Increase the score counter (you want the lowest score possible).</li>
+            <li>Red tiles: Act as solid walls and block movement.</li>
+            <li>Yellow tiles: Force the player back to the last tile they stepped on (player controls are locked briefly during the shock).</li>
+            <li>Orange tiles: Change the player's flavor state to "Orange."</li>
+            <li>Purple tiles: Force the player to slide one tile in the direction they were moving (player controls are locked briefly during the slide). Additionally, purple tiles change the player's flavor state to "Lemon."</li>
+            <li>Blue tiles: Vary based on conditions: If adjacent to a Yellow tile OR if the player's flavor is "Orange," it acts like Yellow. Otherwise, it acts like Pink.</li>
+            <li>Black tiles: Instantly send the player back to the starting tile (0, 0).</li>
+            <li>Rainbow tiles: Mimic the effect of the non-Rainbow tile closest to it (by distance).</li>
+            <li>Cracked tiles: A two-step hazard. The first step makes the tile look like a visible hole. The second step causes the player to fall through, sending them back to the previous tile. The Cracked tile then immediately resets its state and appearance.</li>
+        </ul>
+    </div>
+
+    <div id="win-overlay">
+        <h2>CONGRATULATIONS!</h2>
+        <p>Puzzle Solved!</p>
+        <button class="action-btn" onclick="closeWin()">Play Again</button>
+    </div>
+
+    <script>
+        // --- Configuration ---
+        const TILE_SIZE = 40;
+        const GAP_SIZE = 2;
+        const TILE_TYPES = ['pink', 'green', 'red', 'yellow', 'orange', 'purple', 'blue', 'black', 'rainbow', 'cracked'];
+        
+        const DIFFICULTIES = {
+            mercy:      { w: 9,  h: 5 },
+            cool:       { w: 13, h: 7 },
+            bad:        { w: 17,  h: 9 },
+            determined: { w: 23, h: 11 }
+        };
+
+        // --- Game State ---
+        let currentDiffKey = 'mercy';
+        let gridW = 9;
+        let gridH = 5;
+        let grid = []; // 2D array [y][x] (holds original/permanent type)
+        
+        let playerPos = { x: 0, y: 0 };
+        let lastPos = { x: 0, y: 0 };
+        let endPos = { x: 0, y: 0 };
+        
+        let flavor = null; 
+        let score = 0;
+        let isInputLocked = false;
+        
+        // --- Tile State Tracking (for Cracked) ---
+        // Key: "x,y", Value: 0 (safe/reset) or 1 (cracked/hole)
+        let tileState = {}; 
+
+        // --- DOM Elements ---
+        const boardEl = document.getElementById('game-board');
+        const playerEl = document.getElementById('player');
+        const flavorEl = document.getElementById('flavor-display');
+        const scoreEl = document.getElementById('score-display');
+        const winOverlay = document.getElementById('win-overlay');
+        const diffButtons = document.querySelectorAll('.diff-btn');
+
+        // --- Utility Functions ---
+
+        function dist(x1, y1, x2, y2) {
+            return Math.sqrt(Math.pow(x2 - x1, 2) + Math.pow(y2 - y1, 2));
+        }
+
+        // --- Difficulty Setup ---
+        function setDifficulty(key) {
+            currentDiffKey = key;
+            const settings = DIFFICULTIES[key];
+            gridW = settings.w;
+            gridH = settings.h;
+
+            diffButtons.forEach(btn => {
+                if (btn.innerText.toLowerCase().includes(key === 'cool' ? 'cool' : key)) {
+                    btn.classList.add('active');
+                } else {
+                    btn.classList.remove('active');
+                }
+            });
+
+            boardEl.style.gridTemplateColumns = `repeat(${gridW}, ${TILE_SIZE}px)`;
+            boardEl.style.gridTemplateRows = `repeat(${gridH}, ${TILE_SIZE}px)`;
+
+            initGame();
+        }
+
+        // --- Initialization ---
+        function initGame() {
+            winOverlay.style.display = 'none';
+            playerPos = { x: 0, y: 0 };
+            lastPos = { x: 0, y: 0 };
+            endPos = { x: gridW - 1, y: gridH - 1 };
+            
+            flavor = null;
+            score = 0;
+            isInputLocked = false;
+            tileState = {}; // Reset cracked tile state
+            
+            updateUI();
+            generateSolvableLevel();
+            renderBoard();
+            updatePlayerVisuals();
+            
+            window.focus();
+        }
+
+        function closeWin() {
+            initGame();
+        }
+        
+        function respawn() {
+            if (isInputLocked) return;
+            playerPos = { x: 0, y: 0 };
+            lastPos = { x: 0, y: 0 };
+            flavor = null; 
+            updatePlayerVisuals();
+            updateUI();
+            console.log("Player has respawned to start tile (0,0).");
+        }
+
+        // --- Level Generation ---
+        function generateSolvableLevel() {
+            grid = [];
+            for (let y = 0; y < gridH; y++) {
+                let row = [];
+                for (let x = 0; x < gridW; x++) {
+                    row.push('pink');
+                }
+                grid.push(row);
+            }
+
+            // 2. Random Walk Path Generation (Solvability guarantee)
+            let path = [];
+            let cx = 0, cy = 0;
+            path.push({x: 0, y: 0});
+            while(cx !== endPos.x || cy !== endPos.y) {
+                let moves = [];
+                // Bias moves towards the goal
+                if (cx < endPos.x) moves.push({dx: 1, dy: 0, w: 2}); 
+                if (cy < endPos.y) moves.push({dx: 0, dy: 1, w: 2});
+                if (cx > 0) moves.push({dx: -1, dy: 0, w: 0.1});
+                if (cy > 0) moves.push({dx: 0, dy: -1, w: 0.1});
+                if (cx < endPos.x) moves.push({dx: 1, dy: 0, w: 1});
+                if (cy < endPos.y) moves.push({dx: 0, dy: 1, w: 1});
+
+                let totalW = moves.reduce((a,b) => a + b.w, 0);
+                let rand = Math.random() * totalW;
+                let current = 0;
+                let chosen = moves[0];
+                
+                for (let m of moves) {
+                    current += m.w;
+                    if (rand < current) {
+                        chosen = m;
+                        break;
+                    }
+                }
+
+                cx += chosen.dx;
+                cy += chosen.dy;
+                cx = Math.max(0, Math.min(gridW - 1, cx));
+                cy = Math.max(0, Math.min(gridH - 1, cy));
+                path.push({x: cx, y: cy});
+            }
+
+            // 3. Fill random noise 
+            const ALL_TYPES = TILE_TYPES; 
+            for (let y = 0; y < gridH; y++) {
+                for (let x = 0; x < gridW; x++) {
+                    if ((x === 0 && y === 0) || (x === endPos.x && y === endPos.y)) {
+                        grid[y][x] = 'pink'; 
+                        continue;
+                    }
+                    grid[y][x] = ALL_TYPES[Math.floor(Math.random() * ALL_TYPES.length)];
+                }
+            }
+
+            // 4. Carve Path (must be made of simple, non-blocking tiles)
+            const SAFE_PATH_TYPES = ['pink', 'green', 'orange', 'blue']; 
+            
+            path.forEach(pos => {
+                if (pos.x === endPos.x && pos.y === endPos.y || pos.x === 0 && pos.y === 0) return;
+
+                let chosenType = SAFE_PATH_TYPES[Math.floor(Math.random() * SAFE_PATH_TYPES.length)];
+                
+                // Ensure Blue tiles on path are traversable (no adjacent yellow)
+                if (chosenType === 'blue') {
+                    ensureNoYellowNeighbors(pos.x, pos.y);
+                }
+
+                grid[pos.y][pos.x] = chosenType;
+            });
+            
+            grid[endPos.y][endPos.x] = 'finish';
+        }
+
+        function ensureNoYellowNeighbors(x, y) {
+            const dirs = [[0,1], [0,-1], [1,0], [-1,0]];
+            dirs.forEach(d => {
+                let nx = x + d[0];
+                let ny = y + d[1];
+                if (isValid(nx, ny) && grid[ny][nx] === 'yellow') {
+                    grid[ny][nx] = 'red'; 
+                }
+            });
+        }
+
+        // --- Rendering ---
+        function renderBoard() {
+            boardEl.innerHTML = '';
+            boardEl.appendChild(playerEl);
+
+            for (let y = 0; y < gridH; y++) {
+                for (let x = 0; x < gridW; x++) {
+                    const tile = document.createElement('div');
+                    tile.id = `tile-${x}-${y}`;
+                    tile.className = `tile tile-${grid[y][x]}`;
+                    boardEl.appendChild(tile);
+                }
+            }
+        }
+        
+        function updateTileVisual(x, y, newClass) {
+            const tileEl = document.getElementById(`tile-${x}-${y}`);
+            if (tileEl) {
+                // Clear any previous color/state classes except 'tile'
+                tileEl.className = `tile ${newClass}`;
+            }
+        }
+
+        function updatePlayerVisuals() {
+            const xOffset = playerPos.x * (TILE_SIZE + GAP_SIZE);
+            const yOffset = playerPos.y * (TILE_SIZE + GAP_SIZE);
+            const centerOffset = 6; 
+
+            playerEl.style.left = (xOffset + centerOffset) + 'px';
+            playerEl.style.top = (yOffset + centerOffset) + 'px';
+        }
+
+        function updateUI() {
+            scoreEl.innerText = score;
+            flavorEl.innerText = flavor || "None";
+            if (flavor === 'Orange') flavorEl.style.color = 'orange';
+            else if (flavor === 'Lemon') flavorEl.style.color = '#da70d6';
+            else flavorEl.style.color = '#ccc';
+        }
+
+        // --- Logic Helpers ---
+        function isValid(x, y) {
+            return x >= 0 && x < gridW && y >= 0 && y < gridH;
+        }
+
+        function getTile(x, y) {
+            if (!isValid(x, y)) return 'red';
+            return grid[y][x];
+        }
+        
+        function hasYellowNeighbor(x, y) {
+            const dirs = [[0,1], [0,-1], [1,0], [-1,0]];
+            for (let d of dirs) {
+                let nx = x + d[0];
+                let ny = y + d[1];
+                if (isValid(nx, ny) && grid[ny][nx] === 'yellow') {
+                    return true;
+                }
+            }
+            return false;
+        }
+        
+        function getRainbowTarget(px, py) {
+            let minDistance = Infinity;
+            let targetType = 'pink';
+            
+            for (let y = 0; y < gridH; y++) {
+                for (let x = 0; x < gridW; x++) {
+                    let type = grid[y][x];
+                    // Exclude Rainbow, Walls, and Finish
+                    if (type !== 'rainbow' && type !== 'red' && type !== 'finish') {
+                        let distance = dist(px, py, x, y);
+                        if (distance < minDistance) {
+                            minDistance = distance;
+                            targetType = type;
+                        }
+                    }
+                }
+            }
+            return targetType;
+        }
+
+        // --- Gameplay ---
+        async function attemptMove(dx, dy) {
+            if (isInputLocked) return;
+            if (playerPos.x === endPos.x && playerPos.y === endPos.y) return; 
+
+            const targetX = playerPos.x + dx;
+            const targetY = playerPos.y + dy;
+            
+            if (!isValid(targetX, targetY)) return;
+            
+            const originalTile = getTile(targetX, targetY);
+
+            if (originalTile === 'red') return;
+
+            // Commit Move
+            lastPos = { ...playerPos };
+            playerPos = { x: targetX, y: targetY };
+            updatePlayerVisuals();
+
+            // Process Tile
+            await processTileEffect(originalTile, dx, dy);
+            
+            updateUI();
+            checkWin();
+        }
+
+        async function processTileEffect(originalTile, dx, dy) {
+            let tileType = originalTile;
+            const currentKey = `${playerPos.x},${playerPos.y}`;
+            
+            // 1. Rainbow Mimicry Check
+            if (tileType === 'rainbow') {
+                tileType = getRainbowTarget(playerPos.x, playerPos.y);
+            }
+            
+            // 2. Cracked Tile Logic (Always original type 'cracked', visual changes)
+            if (originalTile === 'cracked') {
+                tileState[currentKey] = (tileState[currentKey] || 0) + 1;
+
+                if (tileState[currentKey] === 1) {
+                    // First step: Act like pink, but reveal the hole visually
+                    updateTileVisual(playerPos.x, playerPos.y, 'tile-cracked-hole');
+                    tileType = 'pink'; 
+                } else if (tileState[currentKey] >= 2) {
+                    // Second step: Fall through, return to previous tile, and reset state/visual
+                    await triggerFall();
+                    
+                    // Reset state and visual
+                    tileState[currentKey] = 0;
+                    updateTileVisual(playerPos.x, playerPos.y, 'tile-cracked'); 
+                    return; 
+                }
+            } else if (tileState[currentKey] === 1 && originalTile !== 'cracked') {
+                // If player was on a cracked hole and stepped off, reset it for visual clarity
+                tileState[currentKey] = 0;
+                updateTileVisual(lastPos.x, lastPos.y, 'tile-cracked'); 
+            }
+            
+            // 3. Black Tile Logic
+            if (tileType === 'black') {
+                respawn();
+                return;
+            }
+
+            // --- Existing Tile Logic ---
+            if (tileType === 'pink') return;
+
+            if (tileType === 'green') {
+                score++;
+                return;
+            }
+
+            if (tileType === 'orange') {
+                flavor = 'Orange';
+                return;
+            }
+
+            if (tileType === 'yellow') {
+                await triggerShock();
+                return;
+            }
+
+            if (tileType === 'blue') {
+                const adjYellow = hasYellowNeighbor(playerPos.x, playerPos.y);
+                if (adjYellow || flavor === 'Orange') {
+                    await triggerShock();
+                }
+                return;
+            }
+
+            if (tileType === 'purple') {
+                flavor = 'Lemon';
+                isInputLocked = true;
+                await new Promise(r => setTimeout(r, 150));
+
+                const slideX = playerPos.x + dx;
+                const slideY = playerPos.y + dy;
+                const slideTile = getTile(slideX, slideY);
+
+                if (slideTile !== 'red' && isValid(slideX, slideY)) {
+                    lastPos = { ...playerPos };
+                    playerPos = { x: slideX, y: slideY };
+                    updatePlayerVisuals();
+                }
+                isInputLocked = false;
+                return;
+            }
+        }
+
+        async function triggerShock() {
+            isInputLocked = true;
+            playerEl.classList.add('shocked');
+            await new Promise(r => setTimeout(r, 400));
+            playerPos = { ...lastPos };
+            updatePlayerVisuals();
+            playerEl.classList.remove('shocked');
+            isInputLocked = false;
+        }
+        
+        async function triggerFall() {
+            isInputLocked = true;
+            playerEl.style.transform = 'scale(0.5)'; 
+            await new Promise(r => setTimeout(r, 200));
+            
+            // Move back to last safe position
+            playerPos = { ...lastPos };
+            updatePlayerVisuals();
+            
+            await new Promise(r => setTimeout(r, 100));
+            playerEl.style.transform = 'scale(1)'; 
+            isInputLocked = false;
+        }
+
+        function checkWin() {
+            if (playerPos.x === endPos.x && playerPos.y === endPos.y) {
+                winOverlay.style.display = 'flex';
+                isInputLocked = true;
+            }
+        }
+
+        window.addEventListener('keydown', (e) => {
+            switch(e.key) {
+                case 'ArrowUp': case 'w': attemptMove(0, -1); break;
+                case 'ArrowDown': case 's': attemptMove(0, 1); break;
+                case 'ArrowLeft': case 'a': attemptMove(-1, 0); break;
+                case 'ArrowRight': case 'd': attemptMove(1, 0); break;
+            }
+        });
+
+        // Start
+        setDifficulty('mercy');
+
+    </script>
+</body>
+</html>
