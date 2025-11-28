@@ -243,7 +243,7 @@
         const DIFFICULTIES = {
             mercy:      { w: 9,  h: 5 },
             cool:       { w: 13, h: 7 },
-            bad:        { w: 17,  h: 9 },
+            bad:        { w: 17, h: 9 },
             determined: { w: 23, h: 11 }
         };
 
@@ -262,7 +262,6 @@
         let isInputLocked = false;
         
         // --- Tile State Tracking (for Cracked) ---
-        // Key: "x,y", Value: 0 (safe/reset) or 1 (cracked/hole)
         let tileState = {}; 
 
         // --- DOM Elements ---
@@ -334,30 +333,57 @@
             console.log("Player has respawned to start tile (0,0).");
         }
 
-        // --- Level Generation ---
+        // --- Level Generation (Solvability Check) ---
+        
         function generateSolvableLevel() {
+            let attempts = 0;
+            let solved = false;
+
+            do {
+                generateRandomGrid();
+                
+                // Add a simple path guarantee first
+                carveSimplePath();
+
+                // Run the BFS check, testing all possible flavor states
+                if (isSolvable('Orange') || isSolvable('Lemon') || isSolvable(null)) {
+                    solved = true;
+                }
+                attempts++;
+                if (attempts > 100) { 
+                    console.warn("Exceeded max attempts to generate a solvable puzzle."); 
+                    break;
+                }
+            } while (!solved);
+            
+            grid[endPos.y][endPos.x] = 'finish';
+        }
+
+        function generateRandomGrid() {
             grid = [];
             for (let y = 0; y < gridH; y++) {
                 let row = [];
                 for (let x = 0; x < gridW; x++) {
-                    row.push('pink');
+                    grid[y] = grid[y] || [];
+                    grid[y][x] = TILE_TYPES[Math.floor(Math.random() * TILE_TYPES.length)];
                 }
-                grid.push(row);
             }
+            grid[0][0] = 'pink'; 
+        }
 
-            // 2. Random Walk Path Generation (Solvability guarantee)
+        function carveSimplePath() {
+            const SAFE_PATH_TYPES = ['pink', 'green', 'orange']; 
             let path = [];
             let cx = 0, cy = 0;
             path.push({x: 0, y: 0});
+
+            // Random walk path creation (biased towards end)
             while(cx !== endPos.x || cy !== endPos.y) {
                 let moves = [];
-                // Bias moves towards the goal
                 if (cx < endPos.x) moves.push({dx: 1, dy: 0, w: 2}); 
                 if (cy < endPos.y) moves.push({dx: 0, dy: 1, w: 2});
                 if (cx > 0) moves.push({dx: -1, dy: 0, w: 0.1});
                 if (cy > 0) moves.push({dx: 0, dy: -1, w: 0.1});
-                if (cx < endPos.x) moves.push({dx: 1, dy: 0, w: 1});
-                if (cy < endPos.y) moves.push({dx: 0, dy: 1, w: 1});
 
                 let totalW = moves.reduce((a,b) => a + b.w, 0);
                 let rand = Math.random() * totalW;
@@ -379,46 +405,129 @@
                 path.push({x: cx, y: cy});
             }
 
-            // 3. Fill random noise 
-            const ALL_TYPES = TILE_TYPES; 
-            for (let y = 0; y < gridH; y++) {
-                for (let x = 0; x < gridW; x++) {
-                    if ((x === 0 && y === 0) || (x === endPos.x && y === endPos.y)) {
-                        grid[y][x] = 'pink'; 
+            // Apply path tiles
+            path.forEach(pos => {
+                if (pos.x === endPos.x && pos.y === endPos.y || pos.x === 0 && pos.y === 0) return;
+                grid[pos.y][pos.x] = SAFE_PATH_TYPES[Math.floor(Math.random() * SAFE_PATH_TYPES.length)];
+            });
+        }
+        
+        /**
+         * Solvability check using Breadth-First Search (BFS)
+         * State: {x, y, flavor}
+         */
+        function isSolvable(initialFlavor) {
+            let queue = [{x: 0, y: 0, flavor: initialFlavor}];
+            let visited = new Set(); // Stores states as "x,y,flavor"
+
+            while (queue.length > 0) {
+                let current = queue.shift();
+                let { x, y, flavor } = current;
+                let stateKey = `${x},${y},${flavor}`;
+
+                if (x === endPos.x && y === endPos.y) return true;
+                if (visited.has(stateKey)) continue;
+                
+                visited.add(stateKey);
+
+                // Try all 4 directions (dx, dy)
+                const dirs = [[0, 1], [0, -1], [1, 0], [-1, 0]];
+                for (let d of dirs) {
+                    let dx = d[0];
+                    let dy = d[1];
+                    let nx = x + dx;
+                    let ny = y + dy;
+
+                    if (!isValid(nx, ny) || getTile(nx, ny) === 'red') continue;
+
+                    let nextTileType = getTile(nx, ny);
+                    let newFlavor = flavor;
+                    let nextPos = { x: nx, y: ny };
+                    
+                    // --- Handle Rainbow Tile for the next tile's effect ---
+                    if (nextTileType === 'rainbow') {
+                        nextTileType = getRainbowTarget(nx, ny);
+                    }
+
+                    // --- Simulate Tile Effects for BFS ---
+
+                    // Black tile: Respawns, breaking this branch of pathfinding.
+                    if (nextTileType === 'black') {
                         continue;
                     }
-                    grid[y][x] = ALL_TYPES[Math.floor(Math.random() * ALL_TYPES.length)];
+                    
+                    // Cracked tile: Ignored, as it resets and never permanently blocks.
+
+                    // Yellow/Blue/Orange Check
+                    if (nextTileType === 'orange') {
+                        newFlavor = 'Orange';
+                    } else if (nextTileType === 'blue') {
+                        const adjYellow = hasYellowNeighborBFS(nx, ny);
+                        if (adjYellow || flavor === 'Orange') {
+                            // Blue acts like Yellow: shocks player back to (x, y). This path is blocked.
+                            continue; 
+                        }
+                    } else if (nextTileType === 'yellow') {
+                        // Yellow shocks player back to (x, y). This path is blocked.
+                        continue;
+                    } else if (nextTileType === 'purple') {
+                        newFlavor = 'Lemon';
+                        // Purple slides one extra tile
+                        let slideX = nx + dx;
+                        let slideY = ny + dy;
+                        
+                        // Check if the slide destination (slideX, slideY) is a wall/out of bounds
+                        if (isValid(slideX, slideY) && getTile(slideX, slideY) !== 'red') {
+                            nextPos = { x: slideX, y: slideY };
+                            // Crucial: Must check the effect of the final slide destination
+                            let finalSlideTileType = getTile(nextPos.x, nextPos.y);
+                            if (finalSlideTileType === 'rainbow') {
+                                finalSlideTileType = getRainbowTarget(nextPos.x, nextPos.y);
+                            }
+
+                            // If the final tile is yellow/blue-shocks/black, the path is blocked/broken.
+                            if (finalSlideTileType === 'black') continue;
+                            if (finalSlideTileType === 'yellow') continue;
+                            if (finalSlideTileType === 'blue') {
+                                if (hasYellowNeighborBFS(nextPos.x, nextPos.y) || newFlavor === 'Orange') continue;
+                            }
+                            // Note: We don't need to simulate further slides or Black/Cracked effects from the final tile, 
+                            // just check if it's an immediate blocker. The successful final position is added to the queue below.
+                            
+                            // If the final slide tile is Orange, the flavor must update for the next move
+                            if (finalSlideTileType === 'orange') {
+                                newFlavor = 'Orange';
+                            }
+                            // If the final slide tile is Purple, the player will slide again on the next move.
+                            // We don't check the second slide here to keep BFS simple, assuming the successful position is safe.
+                            
+                        } 
+                        // If slide is blocked, the player stops at (nx, ny) which is the purple tile itself. 
+                        // The purple tile itself is not a barrier unless the slide destination is a killer tile.
+                    }
+
+                    // Add new state to queue if not visited
+                    let nextStateKey = `${nextPos.x},${nextPos.y},${newFlavor}`;
+                    if (!visited.has(nextStateKey)) {
+                        queue.push({ x: nextPos.x, y: nextPos.y, flavor: newFlavor });
+                    }
                 }
             }
 
-            // 4. Carve Path (must be made of simple, non-blocking tiles)
-            const SAFE_PATH_TYPES = ['pink', 'green', 'orange', 'blue']; 
-            
-            path.forEach(pos => {
-                if (pos.x === endPos.x && pos.y === endPos.y || pos.x === 0 && pos.y === 0) return;
-
-                let chosenType = SAFE_PATH_TYPES[Math.floor(Math.random() * SAFE_PATH_TYPES.length)];
-                
-                // Ensure Blue tiles on path are traversable (no adjacent yellow)
-                if (chosenType === 'blue') {
-                    ensureNoYellowNeighbors(pos.x, pos.y);
-                }
-
-                grid[pos.y][pos.x] = chosenType;
-            });
-            
-            grid[endPos.y][endPos.x] = 'finish';
+            return false; // No path found from start to end
         }
-
-        function ensureNoYellowNeighbors(x, y) {
+        
+        // Helper function for BFS check
+        function hasYellowNeighborBFS(x, y) {
             const dirs = [[0,1], [0,-1], [1,0], [-1,0]];
-            dirs.forEach(d => {
+            for (let d of dirs) {
                 let nx = x + d[0];
                 let ny = y + d[1];
                 if (isValid(nx, ny) && grid[ny][nx] === 'yellow') {
-                    grid[ny][nx] = 'red'; 
+                    return true;
                 }
-            });
+            }
+            return false;
         }
 
         // --- Rendering ---
@@ -439,7 +548,6 @@
         function updateTileVisual(x, y, newClass) {
             const tileEl = document.getElementById(`tile-${x}-${y}`);
             if (tileEl) {
-                // Clear any previous color/state classes except 'tile'
                 tileEl.className = `tile ${newClass}`;
             }
         }
@@ -490,7 +598,6 @@
             for (let y = 0; y < gridH; y++) {
                 for (let x = 0; x < gridW; x++) {
                     let type = grid[y][x];
-                    // Exclude Rainbow, Walls, and Finish
                     if (type !== 'rainbow' && type !== 'red' && type !== 'finish') {
                         let distance = dist(px, py, x, y);
                         if (distance < minDistance) {
@@ -531,11 +638,13 @@
 
         async function processTileEffect(originalTile, dx, dy) {
             let tileType = originalTile;
-            const currentKey = `${playerPos.x},${playerPos.y}`;
+            let currentX = playerPos.x;
+            let currentY = playerPos.y;
+            const currentKey = `${currentX},${currentY}`;
             
             // 1. Rainbow Mimicry Check
             if (tileType === 'rainbow') {
-                tileType = getRainbowTarget(playerPos.x, playerPos.y);
+                tileType = getRainbowTarget(currentX, currentY);
             }
             
             // 2. Cracked Tile Logic (Always original type 'cracked', visual changes)
@@ -543,21 +652,18 @@
                 tileState[currentKey] = (tileState[currentKey] || 0) + 1;
 
                 if (tileState[currentKey] === 1) {
-                    // First step: Act like pink, but reveal the hole visually
-                    updateTileVisual(playerPos.x, playerPos.y, 'tile-cracked-hole');
+                    updateTileVisual(currentX, currentY, 'tile-cracked-hole');
                     tileType = 'pink'; 
                 } else if (tileState[currentKey] >= 2) {
-                    // Second step: Fall through, return to previous tile, and reset state/visual
                     await triggerFall();
                     
-                    // Reset state and visual
                     tileState[currentKey] = 0;
-                    updateTileVisual(playerPos.x, playerPos.y, 'tile-cracked'); 
+                    updateTileVisual(currentX, currentY, 'tile-cracked'); 
                     return; 
                 }
-            } else if (tileState[currentKey] === 1 && originalTile !== 'cracked') {
-                // If player was on a cracked hole and stepped off, reset it for visual clarity
-                tileState[currentKey] = 0;
+            } else if (originalTile !== 'cracked' && tileState[`${lastPos.x},${lastPos.y}`] === 1) {
+                 // Reset the cracked tile we just stepped off if it was a hole
+                tileState[`${lastPos.x},${lastPos.y}`] = 0;
                 updateTileVisual(lastPos.x, lastPos.y, 'tile-cracked'); 
             }
             
@@ -568,7 +674,7 @@
             }
 
             // --- Existing Tile Logic ---
-            if (tileType === 'pink') return;
+            if (tileType === 'pink' || tileType === 'cracked') return;
 
             if (tileType === 'green') {
                 score++;
@@ -586,7 +692,7 @@
             }
 
             if (tileType === 'blue') {
-                const adjYellow = hasYellowNeighbor(playerPos.x, playerPos.y);
+                const adjYellow = hasYellowNeighbor(currentX, currentY);
                 if (adjYellow || flavor === 'Orange') {
                     await triggerShock();
                 }
@@ -598,14 +704,19 @@
                 isInputLocked = true;
                 await new Promise(r => setTimeout(r, 150));
 
-                const slideX = playerPos.x + dx;
-                const slideY = playerPos.y + dy;
-                const slideTile = getTile(slideX, slideY);
+                const slideX = currentX + dx;
+                const slideY = currentY + dy;
+                const slideTileOriginal = getTile(slideX, slideY);
 
-                if (slideTile !== 'red' && isValid(slideX, slideY)) {
-                    lastPos = { ...playerPos };
+                if (slideTileOriginal !== 'red' && isValid(slideX, slideY)) {
+                    // Update player position to the slide destination
+                    lastPos = { x: currentX, y: currentY }; // Set the purple tile as the last safe tile
                     playerPos = { x: slideX, y: slideY };
                     updatePlayerVisuals();
+                    
+                    // RECURSIVELY PROCESS THE EFFECT OF THE DESTINATION TILE
+                    const nextTileOriginal = getTile(slideX, slideY);
+                    await processTileEffect(nextTileOriginal, dx, dy);
                 }
                 isInputLocked = false;
                 return;
@@ -627,7 +738,6 @@
             playerEl.style.transform = 'scale(0.5)'; 
             await new Promise(r => setTimeout(r, 200));
             
-            // Move back to last safe position
             playerPos = { ...lastPos };
             updatePlayerVisuals();
             
